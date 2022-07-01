@@ -58,6 +58,11 @@ contract AuctionRepository {
         _;
     }
 
+    modifier auctionExists(uint256 _auctionId) {
+        require(auctions.length > _auctionId, "Auction does not exist");
+        _;
+    }
+
     /**
      * @dev Guarantees this contract is owner of the given deed/token
      * @param _deedRepositoryAddress address of the deed repository to validate from
@@ -74,7 +79,7 @@ contract AuctionRepository {
     }
 
     /**
-     * @dev Gets the lenth of auctions
+     * @dev Gets the length of auctions
      * @return uint representing the auction count
      */
     function getCount() public view returns (uint256) {
@@ -140,7 +145,8 @@ contract AuctionRepository {
      */
     function getAuctionById(uint256 _auctionId)
         public
-        view
+        view 
+        auctionExists(_auctionId)
         returns (Auction memory)
     {
         Auction memory auc = auctions[_auctionId];
@@ -187,7 +193,7 @@ contract AuctionRepository {
      * @dev Bidder is refunded with the initial amount
      * @param _auctionId uint ID of the created auction
      */
-    function cancelAuction(uint256 _auctionId) public isOwner(_auctionId) {
+    function cancelAuction(uint256 _auctionId) public auctionExists(_auctionId) isOwner(_auctionId) {
         Auction memory myAuction = auctions[_auctionId];
         uint256 bidsLength = auctionBids[_auctionId].length;
 
@@ -219,7 +225,7 @@ contract AuctionRepository {
      * @dev On success Deed is transfered to bidder and auction owner gets the amount
      * @param _auctionId uint ID of the created auction
      */
-    function finalizeAuction(uint256 _auctionId) public {
+    function finalizeAuction(uint256 _auctionId) public auctionExists(_auctionId) {
         Auction memory myAuction = auctions[_auctionId];
         uint256 bidsLength = auctionBids[_auctionId].length;
 
@@ -257,7 +263,7 @@ contract AuctionRepository {
      * @dev Refund previous bidder if a new bid is valid and placed
      * @param _auctionId uint ID of the created auction
      */
-    function bidOnAuction(uint256 _auctionId) external payable {
+    function bidOnAuction(uint256 _auctionId) external payable auctionExists(_auctionId) {
         uint256 amountSent = msg.value;
 
         // owner can't bid on their auctions
