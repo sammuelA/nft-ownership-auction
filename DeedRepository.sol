@@ -14,6 +14,11 @@ contract DeedRepository is ERC721URIStorage {
         ERC721(_name, _symbol)
     {}
 
+    /**
+     * @dev Mint a new token and set token URI
+     * @param _tokenId ID of new token to be minted
+     * @param _uri URI of new token to be minted
+    */
     function registerDeed(uint256 _tokenId, string memory _uri) public {
         _mint(msg.sender, _tokenId);
         bool result = addDeedMetadata(_tokenId, _uri);
@@ -24,6 +29,11 @@ contract DeedRepository is ERC721URIStorage {
         }
     }
 
+    /**
+     * @dev Set token URI
+     * @param _tokenId ID of token 
+     * @param _uri Metadata URI to be added to _tokenId
+    */
     function addDeedMetadata(uint256 _tokenId, string memory _uri)
         public
         returns (bool)
