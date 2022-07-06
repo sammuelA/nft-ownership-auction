@@ -2,14 +2,20 @@
 pragma solidity ^0.8.0;
 
 import "./DeedRepository.sol";
+import "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
+import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
+import "@openzeppelin/contracts/utils/Counters.sol";
 
 /**
 @title Auction Repository
  * This contract allows auctions to be created for non-fungible tokens
  * Moreover, it includes the basic functionalities of an auction house
  */
-contract AuctionRepository {
-    // Auction struct which holds all the required info
+contract AuctionRepository is IERC721Receiver {
+    using Counters for Counters.Counter;
+    Counters.Counter private _auctionCounter;
+
+    // Auction struct which holds all the required info of an auction
     struct Auction {
         string name;
         uint256 blockDeadline;
@@ -34,16 +40,15 @@ contract AuctionRepository {
     // AuctionCreated is fired when an auction is created
     event AuctionCreated(address _owner, uint256 _auctionId);
 
-    // AuctionCanceld is fired when an auction is canceled
-    event AuctionCanceled(address _owner, uint256 _auctionId);
+    // AuctionCancelled is fired when an auction is canceled
+    event AuctionCancelled(address _owner, uint256 _auctionId);
 
     // AuctionFinalized is fired when an auction is finalized
     event AuctionFinalized(address _owner, uint256 _auctionId);
 
-    // Array with all auctions
-    Auction[] public auctions;
+    mapping(uint256 => Auction) auctions;
 
-    // Mapping from auction index to user bids
+    // Mapping from an auction's index to user bids
     mapping(uint256 => Bid[]) public auctionBids;
 
     // Mapping from owner to a list of owned auctions
@@ -64,21 +69,28 @@ contract AuctionRepository {
      * @param _deedId uint256 ID of the deed which has been registered in the deed repository
      */
     modifier contractIsDeedOwner(
-        address payable _deedRepositoryAddress,
+        address _deedRepositoryAddress,
         uint256 _deedId
     ) {
-        DeedRepository repository = DeedRepository(_deedRepositoryAddress);
+        require(
+            _deedRepositoryAddress != address(0),
+            "Invalid repository address"
+        );
+        DeedRepository repository = DeedRepository(payable(_deedRepositoryAddress));
         address deedOwner = repository.ownerOf(_deedId);
-        require(deedOwner == address(this));
+        require(
+            deedOwner == address(this),
+            "You need to transfer the deed to the marketplace to start an auction"
+        );
         _;
     }
 
     /**
-     * @dev Gets the lenth of auctions
-     * @return uint representing the auction count
+     * @dev Gets the length of auctions
+     * @return uint represents the auction count
      */
     function getCount() public view returns (uint256) {
-        return auctions.length;
+        return _auctionCounter.current();
     }
 
     /**
@@ -90,7 +102,7 @@ contract AuctionRepository {
     }
 
     /**
-     * @dev Gets an array of owned auctions
+     * @dev Gets an array of owned auctions of param _owner
      * @param _owner address of the auction owner
      */
     function getAuctionsOf(address _owner)
@@ -148,35 +160,55 @@ contract AuctionRepository {
     }
 
     /**
-     * @dev Gets the info of a given auction which are store within a struct
+     * @dev Creates an auction from params
      * @return the auction struct containing all info related to it
      */
-    function createAuction(Auction memory auction)
+    function createAuction(
+        string memory _name,
+        uint256 blockDeadline,
+        uint256 startPrice,
+        string memory _metadata,
+        uint256 deedId,
+        address _deedRepositoryAddress
+    )
         public
-        contractIsDeedOwner(
-            payable(auction.deedRepositoryAddress),
-            auction.deedId
-        )
+        contractIsDeedOwner(_deedRepositoryAddress, deedId)
         returns (bool)
     {
-        uint256 auctionId = auctions.length;
-        auctions.push(auction);
+        require(bytes(_name).length > 0, "Invalid name");
+        require(blockDeadline > 0, "Invalid blockDeadline");
+        require(startPrice > 0, "Invalid price");
+        require(bytes(_metadata).length > 0, "Invalid uri");
+        uint256 auctionId = _auctionCounter.current();
+        _auctionCounter.increment();
+        auctions[auctionId] = Auction(
+            _name,
+            blockDeadline + block.timestamp,
+            startPrice,
+            _metadata,
+            deedId,
+            _deedRepositoryAddress,
+            payable(msg.sender),
+            true,
+            false
+        );
         auctionOwner[msg.sender].push(auctionId);
 
         emit AuctionCreated(msg.sender, auctionId);
         return true;
     }
 
-    function approveAndTransfer(
+    function transfer(
         address _from,
         address _to,
         address _deedRepositoryAddress,
         uint256 _deedId
     ) internal returns (bool) {
-        DeedRepository remoteContract = DeedRepository(
-            payable(_deedRepositoryAddress)
+        require(
+            _deedRepositoryAddress != address(0),
+            "Invalid repository address"
         );
-        remoteContract.approve(_to, _deedId);
+        DeedRepository remoteContract = DeedRepository(payable(_deedRepositoryAddress));
         remoteContract.transferFrom(_from, _to, _deedId);
         return true;
     }
@@ -190,18 +222,17 @@ contract AuctionRepository {
     function cancelAuction(uint256 _auctionId) public isOwner(_auctionId) {
         Auction memory myAuction = auctions[_auctionId];
         uint256 bidsLength = auctionBids[_auctionId].length;
-
+        require(!myAuction.finalized && myAuction.active && myAuction.blockDeadline > block.timestamp, "Auction is over");
         // If there are bids refund the last bid
         if (bidsLength > 0) {
             Bid memory lastBid = auctionBids[_auctionId][bidsLength - 1];
-            if (!lastBid.from.send(lastBid.amount)) {
-                revert();
-            }
+            (bool sent,) = payable(lastBid.from).call{value: lastBid.amount}("");
+            require(sent, "bid refund failed");
         }
 
         // approve and transfer from this contract to auction owner
         if (
-            approveAndTransfer(
+            transfer(
                 address(this),
                 myAuction.owner,
                 myAuction.deedRepositoryAddress,
@@ -209,7 +240,7 @@ contract AuctionRepository {
             )
         ) {
             auctions[_auctionId].active = false;
-            emit AuctionCanceled(msg.sender, _auctionId);
+            emit AuctionCancelled(msg.sender, _auctionId);
         }
     }
 
@@ -231,13 +262,12 @@ contract AuctionRepository {
         } else {
             // 2. the money goes to the auction owner
             Bid memory lastBid = auctionBids[_auctionId][bidsLength - 1];
-            if (!myAuction.owner.send(lastBid.amount)) {
-                revert();
-            }
+            (bool success,) = myAuction.owner.call{value: lastBid.amount}("");
+            require(success, "Payment failed");
 
             // approve and transfer from this contract to the bid winner
             if (
-                approveAndTransfer(
+                transfer(
                     address(this),
                     lastBid.from,
                     myAuction.deedRepositoryAddress,
@@ -262,11 +292,9 @@ contract AuctionRepository {
 
         // owner can't bid on their auctions
         Auction memory myAuction = auctions[_auctionId];
-        if (myAuction.owner == msg.sender) revert();
-
-        // if auction is expired
-        if (block.timestamp > myAuction.blockDeadline) revert();
-
+        require(myAuction.owner != msg.sender, "Can't bid on your own auction");
+        // if auction is over
+        require(myAuction.blockDeadline < block.timestamp, "Time to bid is over");
         uint256 bidsLength = auctionBids[_auctionId].length;
         uint256 tempAmount = myAuction.startPrice;
         Bid memory lastBid;
@@ -278,13 +306,11 @@ contract AuctionRepository {
         }
 
         // check if amount is greater than previous amount
-        if (amountSent < tempAmount) revert();
-
+        require(amountSent > tempAmount, "Bid value too low");
         // refund the last bidder
         if (bidsLength > 0) {
-            if (!lastBid.from.send(lastBid.amount)) {
-                revert();
-            }
+            (bool sent,) = payable(lastBid.from).call{value: lastBid.amount}("");
+            require(sent, "Failed to return bid value to previous owner");
         }
 
         // insert bid
@@ -293,5 +319,14 @@ contract AuctionRepository {
         newBid.amount = amountSent;
         auctionBids[_auctionId].push(newBid);
         emit BidSuccess(msg.sender, _auctionId);
+    }
+
+    function onERC721Received(
+        address,
+        address,
+        uint256,
+        bytes calldata
+    ) external pure override returns (bytes4) {
+        return bytes4(this.onERC721Received.selector);
     }
 }
