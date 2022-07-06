@@ -15,17 +15,19 @@ contract DeedRepository is ERC721URIStorage {
     {}
 
     function registerDeed(uint256 _tokenId, string memory _uri) public {
+        require(!_exists(_tokenId), "Deed already exist");
+        require(bytes(_uri).length > 0, "Invalid uri");
         _mint(msg.sender, _tokenId);
         bool result = addDeedMetadata(_tokenId, _uri);
         if (result) {
             emit DeedRegistered(msg.sender, _tokenId);
         } else {
-            revert();
+            revert("Failed to regist deed");
         }
     }
 
     function addDeedMetadata(uint256 _tokenId, string memory _uri)
-        public
+        private
         returns (bool)
     {
         _setTokenURI(_tokenId, _uri);
