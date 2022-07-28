@@ -58,20 +58,13 @@ contract AuctionRepository {
         _;
     }
 
-    /**
-     * @dev Guarantees this contract is owner of the given deed/token
-     * @param _deedRepositoryAddress address of the deed repository to validate from
-     * @param _deedId uint256 ID of the deed which has been registered in the deed repository
-     */
-    modifier contractIsDeedOwner(
-        address payable _deedRepositoryAddress,
-        uint256 _deedId
-    ) {
-        DeedRepository repository = DeedRepository(_deedRepositoryAddress);
-        address deedOwner = repository.ownerOf(_deedId);
-        require(deedOwner == address(this));
-        _;
-    }
+     // deleting auction  from the list
+     function deleteAuction(uint _auctionId) external isOwner(_auctionId) {       
+            auctions[_auctionId] = auctions[auctions.length - 1];
+            delete auctions[auctions.length - 1];
+	 }
+
+    
 
     /**
      * @dev Gets the lenth of auctions
@@ -152,17 +145,12 @@ contract AuctionRepository {
      * @return the auction struct containing all info related to it
      */
     function createAuction(Auction memory auction)
-        public
-        contractIsDeedOwner(
-            payable(auction.deedRepositoryAddress),
-            auction.deedId
-        )
+        public 
         returns (bool)
     {
         uint256 auctionId = auctions.length;
         auctions.push(auction);
         auctionOwner[msg.sender].push(auctionId);
-
         emit AuctionCreated(msg.sender, auctionId);
         return true;
     }
